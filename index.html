@@ -1,0 +1,2208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0a1018" />
+<meta name="description" content="Fast 1v1 top-down football you can play in a browser with a friend." />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Sunday League" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/icon.svg" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<style>
+/* ============================================================================
+   Sunday League — visual identity
+   A floodlit night match: the pitch is the only lit thing on the screen.
+   Team colour is the only saturated ink in the whole UI, so wherever you see
+   red or blue it means something. Everything else is night, glass and chalk.
+   ========================================================================== */
+
+:root {
+  --night:      #070d14;
+  --night-2:    #0e1a25;
+  --glass:      rgba(228, 242, 255, 0.055);
+  --glass-line: rgba(228, 242, 255, 0.14);
+  --chalk:      #eaf2f0;
+  --chalk-dim:  rgba(234, 242, 240, 0.58);
+  --red:        #ff3b52;
+  --blue:       #2f7bff;
+  --turf:       #1e7a3e;
+
+  --pad: clamp(16px, 3vmin, 28px);
+  --radius: 18px;
+  --radius-pill: 999px;
+  --tap: 56px;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display",
+          "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: var(--night);
+  color: var(--chalk);
+  font-family: var(--font);
+  font-size: 16px;
+  -webkit-user-select: none; user-select: none;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+body::before {                       /* floodlight spill from the top corners */
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(1100px 620px at 12% -12%, rgba(150,200,255,.11), transparent 62%),
+    radial-gradient(1100px 620px at 88% -12%, rgba(150,200,255,.09), transparent 62%),
+    linear-gradient(#070d14, #050a10);
+}
+
+.hidden { display: none !important; }
+
+/* ------------------------------------------------------------------ canvas */
+#pitch {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  display: block; z-index: 1; touch-action: none;
+}
+
+/* ----------------------------------------------------------------- screens */
+#screens {
+  position: fixed; inset: 0; z-index: 40;
+  pointer-events: none;             /* the container must never eat a touch */
+}
+
+.screen {
+  position: absolute; inset: 0;
+  display: none; place-items: center;
+  padding: max(var(--pad), env(safe-area-inset-top))
+           max(var(--pad), env(safe-area-inset-right))
+           max(var(--pad), env(safe-area-inset-bottom))
+           max(var(--pad), env(safe-area-inset-left));
+  overflow-y: auto;
+}
+.screen.active { display: grid; pointer-events: auto; animation: rise .34s cubic-bezier(.2,.8,.25,1); }
+
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+.panel {
+  width: min(400px, 100%);
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: 26px;
+  padding: clamp(20px, 4vmin, 32px);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 26px 70px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.07);
+  text-align: center;
+}
+.panel.wide { width: min(460px, 100%); }
+
+/* --------------------------------------------------------------- wordmark */
+.crest { width: 62px; margin: 0 auto 14px; }
+.crest svg { width: 100%; display: block; }
+.crest .c1 { fill: none; stroke: var(--chalk); stroke-width: 3; opacity: .75; }
+.crest .c2 { fill: var(--chalk); opacity: .9; }
+
+.wordmark {
+  margin: 0 0 6px;
+  font-size: clamp(38px, 8vmin, 54px);
+  font-weight: 800;
+  line-height: .88;
+  letter-spacing: -.035em;
+}
+.wordmark em {
+  font-style: italic; font-weight: 800;
+  color: transparent;
+  background: linear-gradient(96deg, var(--red), var(--blue));
+  -webkit-background-clip: text; background-clip: text;
+}
+.wordmark.small { font-size: clamp(30px, 6vmin, 40px); }
+
+h2 { margin: 0 0 8px; font-size: 26px; font-weight: 750; letter-spacing: -.02em; }
+.sub { margin: 0 0 20px; color: var(--chalk-dim); font-size: 15px; line-height: 1.5; }
+.sub.small { font-size: 13px; margin-top: 16px; }
+.greet {
+  display: block; margin: 0 auto 22px; padding: 6px 14px;
+  font: inherit; font-size: 15px; color: var(--chalk-dim);
+  background: none; border: 1px dashed rgba(234,242,240,.2);
+  border-radius: var(--radius-pill); cursor: pointer;
+}
+.greet:active { color: var(--chalk); }
+
+/* --------------------------------------------------------------- controls */
+.field { display: block; text-align: left; margin: 0 0 16px; }
+.field span { display: block; font-size: 13px; color: var(--chalk-dim); margin-bottom: 8px; }
+
+input[type="text"] {
+  width: 100%; height: var(--tap);
+  padding: 0 18px;
+  font: inherit; font-size: 17px; color: var(--chalk);
+  background: rgba(6,12,18,.55);
+  border: 1px solid var(--glass-line);
+  border-radius: 14px;
+  outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+input[type="text"]:focus-visible { border-color: rgba(47,123,255,.75); box-shadow: 0 0 0 4px rgba(47,123,255,.2); }
+input::placeholder { color: rgba(234,242,240,.26); }
+
+.code-input {
+  text-align: center; font-size: 34px !important; font-weight: 750;
+  letter-spacing: .3em; text-indent: .3em; height: 74px; margin-bottom: 18px;
+  text-transform: uppercase;
+}
+
+.btn {
+  display: block; width: 100%; min-height: var(--tap);
+  margin-top: 10px; padding: 0 20px;
+  font: inherit; font-size: 17px; font-weight: 650; letter-spacing: -.01em;
+  color: var(--chalk);
+  background: rgba(234,242,240,.07);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: transform .12s cubic-bezier(.2,.8,.25,1), background .18s, opacity .18s;
+}
+.btn:active { transform: scale(.965); background: rgba(234,242,240,.13); }
+.btn:focus-visible { outline: 3px solid rgba(47,123,255,.7); outline-offset: 3px; }
+.btn[disabled] { opacity: .38; pointer-events: none; }
+
+.btn.primary {
+  background: linear-gradient(180deg, #2f7bff, #1d5ad4);
+  border-color: rgba(120,175,255,.55);
+  box-shadow: 0 12px 30px rgba(47,123,255,.32);
+}
+.btn.primary:active { background: linear-gradient(180deg, #2a6ee6, #1a4fbd); }
+.btn.ghost { background: none; border-color: transparent; color: var(--chalk-dim); font-weight: 550; }
+.btn.tiny { min-height: 40px; font-size: 14px; width: auto; padding: 0 18px; margin: 0 auto 4px; }
+
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 14px 2px; border-bottom: 1px solid rgba(234,242,240,.08);
+  font-size: 16px;
+}
+.toggle {
+  min-width: 118px; height: 42px; padding: 0 16px;
+  font: inherit; font-size: 15px; font-weight: 600; color: var(--chalk-dim);
+  background: rgba(6,12,18,.5); border: 1px solid var(--glass-line);
+  border-radius: var(--radius-pill); cursor: pointer; transition: all .18s;
+}
+.toggle.on { color: var(--chalk); background: rgba(47,123,255,.24); border-color: rgba(47,123,255,.55); }
+
+/* ------------------------------------------------------------ room screen */
+.code-display {
+  font-size: clamp(44px, 10vmin, 62px); font-weight: 800;
+  letter-spacing: .16em; text-indent: .16em;
+  margin: 2px 0 14px; font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 34px rgba(150,200,255,.35);
+}
+
+.slots { display: grid; gap: 10px; margin: 18px 0; }
+.slot {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
+  padding: 14px 16px; text-align: left;
+  background: rgba(6,12,18,.42); border: 1px solid var(--glass-line);
+  border-left-width: 5px; border-left-color: rgba(234,242,240,.12);
+  border-radius: 14px;
+  transition: border-color .25s;
+}
+.slot.red  { border-left-color: var(--red); }
+.slot.blue { border-left-color: var(--blue); }
+.slot.empty .slot-name { color: rgba(234,242,240,.3); font-style: italic; }
+.slot-role { font-size: 12px; color: var(--chalk-dim); }
+.slot-name { font-size: 17px; font-weight: 650; }
+.slot-team { font-size: 12px; font-weight: 700; color: var(--chalk-dim); }
+
+.team-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 6px; }
+.team {
+  min-height: 52px; font: inherit; font-size: 16px; font-weight: 650; color: var(--chalk);
+  background: rgba(6,12,18,.5); border: 2px solid var(--glass-line);
+  border-radius: 14px; cursor: pointer; transition: all .18s;
+}
+.team:active { transform: scale(.96); }
+.team.red.picked  { background: rgba(255,59,82,.24);  border-color: var(--red); }
+.team.blue.picked { background: rgba(47,123,255,.24); border-color: var(--blue); }
+.team[disabled] { opacity: .32; pointer-events: none; }
+
+/* ------------------------------------------------------------- end screen */
+.fulltime { margin: 0 0 18px; font-size: 14px; color: var(--chalk-dim); letter-spacing: .22em; }
+.final { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+.final-side { display: grid; gap: 6px; padding: 18px 8px; background: rgba(6,12,18,.42); border-radius: 16px; }
+.final-side strong { font-size: 56px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.tag { font-size: 13px; font-weight: 700; letter-spacing: .06em; }
+.tag.red { color: var(--red); } .tag.blue { color: var(--blue); }
+.verdict { margin: 0 0 22px; font-size: 20px; font-weight: 700; }
+
+/* -------------------------------------------------------------------- HUD */
+#hud {
+  position: fixed; z-index: 20; left: 0; right: 0;
+  top: max(10px, env(safe-area-inset-top));
+  display: grid; justify-items: center; gap: 6px; pointer-events: none;
+}
+.scoreboard {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px;
+  min-width: min(340px, 78vw);
+  padding: 9px 16px;
+  background: rgba(7,13,20,.62);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+.scoreboard .side { display: grid; gap: 1px; min-width: 0; }
+.scoreboard .side.blue { text-align: right; }
+.scoreboard .tag { font-size: 11px; letter-spacing: .1em; }
+.scoreboard .side.red .tag { color: var(--red); }
+.scoreboard .side.blue .tag { color: var(--blue); }
+.scoreboard .name {
+  font-size: 13px; color: var(--chalk-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.numbers { font-size: 27px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.numbers i { font-style: normal; opacity: .32; margin: 0 3px; }
+.clock {
+  padding: 3px 14px; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: rgba(7,13,20,.62); border: 1px solid var(--glass-line);
+  border-radius: var(--radius-pill);
+}
+.clock.urgent { color: var(--red); animation: pulse 1s steps(2, jump-none) infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+
+/* --------------------------------------------------------- touch controls */
+#touch { position: fixed; inset: 0; z-index: 25; pointer-events: none; }
+
+.stick {
+  position: absolute;
+  left: max(30px, env(safe-area-inset-left));
+  bottom: max(30px, env(safe-area-inset-bottom));
+  width: 150px; height: 150px; pointer-events: auto; touch-action: none;
+}
+.stick-base {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(7,13,20,.32);
+  border: 1.5px solid rgba(228,242,255,.30);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.stick-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%;
+  background: rgba(232,244,255,.5);
+  border: 1.5px solid rgba(255,255,255,.7);
+  box-shadow: 0 6px 18px rgba(0,0,0,.45);
+  transition: transform .06s linear, background .15s;
+}
+.stick.active .stick-knob { background: rgba(232,244,255,.72); }
+
+.actions {
+  position: absolute;
+  right: max(34px, env(safe-area-inset-right));
+  bottom: max(34px, env(safe-area-inset-bottom));
+  display: grid; gap: 16px; justify-items: end; pointer-events: none;
+}
+.act {
+  position: relative; pointer-events: auto; touch-action: none;
+  width: 84px; height: 84px; border-radius: 50%;
+  font: inherit; font-size: 14px; font-weight: 700; color: var(--chalk);
+  background: rgba(7,13,20,.42);
+  border: 1.5px solid rgba(228,242,255,.34);
+  text-shadow: 0 1px 3px rgba(0,0,0,.6);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  cursor: pointer; overflow: hidden;
+  transition: transform .09s cubic-bezier(.2,.8,.25,1), background .12s;
+}
+.act span { position: relative; z-index: 2; }
+.act.pressed { transform: scale(.9); background: rgba(228,242,255,.26); }
+.act.shoot  { width: 100px; height: 100px; font-size: 15px; background: rgba(122,14,29,.62); border-color: rgba(255,59,82,.8); }
+.act.pass   { background: rgba(15,44,110,.62); border-color: rgba(47,123,255,.78); }
+.act.sprint { width: 72px; height: 72px; font-size: 13px; }
+.actions .act.shoot { order: 3; } .actions .act.pass { order: 2; } .actions .act.sprint { order: 1; }
+
+.charge {
+  position: absolute; left: 0; bottom: 0; width: 100%; height: 0%;
+  background: linear-gradient(180deg, rgba(255,158,72,.85), rgba(255,59,82,.9));
+  z-index: 1; transition: height .05s linear;
+}
+.stamina-ring { position: absolute; inset: 4px; transform: rotate(-90deg); z-index: 1; }
+.ring-bg { fill: none; stroke: rgba(228,242,255,.14); stroke-width: 7; }
+.ring-fg {
+  fill: none; stroke: #5be08a; stroke-width: 7; stroke-linecap: round;
+  stroke-dasharray: 289; stroke-dashoffset: 0; transition: stroke-dashoffset .12s linear, stroke .3s;
+}
+.ring-fg.low { stroke: #ffb547; }
+
+/* --------------------------------------------------------------- overlays */
+.overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: grid; place-content: center; justify-items: center; gap: 18px;
+  padding: 24px; text-align: center;
+  background: rgba(4,8,13,.9);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.overlay p { margin: 0; font-size: 18px; color: var(--chalk-dim); max-width: 320px; }
+.rotate-icon svg { width: 74px; fill: none; stroke: var(--chalk); stroke-width: 3; stroke-linecap: round; opacity: .8; }
+.rotate-icon { animation: tilt 2.4s ease-in-out infinite; }
+@keyframes tilt { 0%,100% { transform: rotate(0); } 55%,80% { transform: rotate(-90deg); } }
+
+.spinner {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 3px solid rgba(228,242,255,.16); border-top-color: var(--blue);
+  animation: spin .85s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toast {
+  position: fixed; z-index: 70; left: 50%; transform: translateX(-50%);
+  bottom: max(26px, env(safe-area-inset-bottom));
+  padding: 13px 22px; max-width: 84vw;
+  font-size: 15px; font-weight: 600;
+  background: rgba(255,59,82,.92); color: #fff;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 14px 34px rgba(0,0,0,.5);
+  animation: rise .26s cubic-bezier(.2,.8,.25,1);
+}
+
+.debug {
+  position: fixed; z-index: 65;
+  top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left));
+  display: flex; gap: 10px; padding: 6px 10px;
+  font-size: 11px; font-variant-numeric: tabular-nums; color: #7de08a;
+  background: rgba(4,8,13,.72); border-radius: 8px; pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* Short landscape phones: shrink the furniture so the pitch keeps the screen. */
+@media (max-height: 460px) {
+  .panel { padding: 16px 18px; }
+  .stick { width: 118px; height: 118px; }
+  .stick-knob { width: 50px; height: 50px; margin: -25px 0 0 -25px; }
+  .act { width: 68px; height: 68px; font-size: 12px; }
+  .act.shoot { width: 80px; height: 80px; font-size: 13px; }
+  .act.sprint { width: 58px; height: 58px; font-size: 11px; }
+  .actions { gap: 10px; }
+}
+
+</style>
+<title>Sunday League — 2D football</title>
+</head>
+<body>
+
+<canvas id="pitch"></canvas>
+
+<!-- ------------------------------------------------------------ match HUD -->
+<div id="hud" class="hidden">
+  <div class="scoreboard">
+    <div class="side red">
+      <span class="tag">RED</span>
+      <span class="name" id="hud-red-name">Player 1</span>
+    </div>
+    <div class="numbers">
+      <span id="hud-red-score">0</span><i>:</i><span id="hud-blue-score">0</span>
+    </div>
+    <div class="side blue">
+      <span class="tag">BLU</span>
+      <span class="name" id="hud-blue-name">Player 2</span>
+    </div>
+  </div>
+  <div class="clock" id="hud-clock">3:00</div>
+</div>
+
+<!-- ------------------------------------------------------- touch controls -->
+<div id="touch" class="hidden">
+  <div id="stick" class="stick">
+    <div class="stick-base"></div>
+    <div class="stick-knob" id="stick-knob"></div>
+  </div>
+  <div class="actions">
+    <button class="act sprint" id="btn-sprint" aria-label="Sprint">
+      <span>Sprint</span>
+      <svg class="stamina-ring" viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="ring-bg" cx="50" cy="50" r="46"></circle>
+        <circle class="ring-fg" id="stamina-arc" cx="50" cy="50" r="46"></circle>
+      </svg>
+    </button>
+    <button class="act pass" id="btn-pass" aria-label="Pass"><span>Pass</span></button>
+    <button class="act shoot" id="btn-shoot" aria-label="Shoot">
+      <span>Shoot</span>
+      <div class="charge" id="shoot-charge"></div>
+    </button>
+  </div>
+</div>
+
+<!-- --------------------------------------------------------------- screens -->
+<main id="screens">
+
+  <section class="screen active" data-screen="name">
+    <div class="panel">
+      <div class="crest" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" class="c1"/><path class="c2" d="M32 12l7 5-3 9h-8l-3-9zM17 27l7-5 3 9-6 7-7-3zM47 27l-7-5-3 9 6 7 7-3zM24 45l3-7h10l3 7-8 6z"/></svg>
+      </div>
+      <h1 class="wordmark">Sunday<br><em>League</em></h1>
+      <p class="sub">Two players, one pitch, three minutes.</p>
+      <label class="field">
+        <span>What should we call you?</span>
+        <input id="input-name" type="text" maxlength="12" autocomplete="off"
+               autocapitalize="words" spellcheck="false" placeholder="Emre" />
+      </label>
+      <button class="btn primary" id="btn-continue">Continue</button>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="menu">
+    <div class="panel">
+      <h1 class="wordmark small">Sunday<br><em>League</em></h1>
+      <button class="greet" id="greet">Playing as Emre</button>
+      <button class="btn primary" id="btn-quick">Find an opponent</button>
+      <button class="btn" id="btn-create">Create a room</button>
+      <button class="btn" id="btn-join-screen">Join with a code</button>
+      <button class="btn ghost" id="btn-settings">Settings</button>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="join">
+    <div class="panel">
+      <h2>Join a room</h2>
+      <p class="sub">Ask your friend for the five character code on their screen.</p>
+      <input id="input-code" class="code-input" type="text" maxlength="5"
+             autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="A7K92" />
+      <button class="btn primary" id="btn-join">Join</button>
+      <button class="btn ghost" data-back="menu">Back</button>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="room">
+    <div class="panel wide">
+      <p class="sub">Room code</p>
+      <div class="code-display" id="room-code">-----</div>
+      <button class="btn tiny" id="btn-copy">Copy invite link</button>
+
+      <div class="slots">
+        <div class="slot" id="slot-0">
+          <span class="slot-role">Host</span>
+          <span class="slot-name">Waiting</span>
+          <span class="slot-team"></span>
+        </div>
+        <div class="slot" id="slot-1">
+          <span class="slot-role">Challenger</span>
+          <span class="slot-name">Waiting</span>
+          <span class="slot-team"></span>
+        </div>
+      </div>
+
+      <div class="team-pick">
+        <button class="team red" data-team="RED">Red</button>
+        <button class="team blue" data-team="BLUE">Blue</button>
+      </div>
+
+      <button class="btn primary" id="btn-start">Start match</button>
+      <button class="btn ghost" id="btn-leave">Leave room</button>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="settings">
+    <div class="panel">
+      <h2>Settings</h2>
+      <div class="row">
+        <span>Sound</span>
+        <button class="toggle on" id="set-sound">On</button>
+      </div>
+      <div class="row">
+        <span>Camera</span>
+        <button class="toggle" id="set-camera">Whole pitch</button>
+      </div>
+      <div class="row">
+        <span>Performance readout</span>
+        <button class="toggle" id="set-debug">Off</button>
+      </div>
+      <p class="sub small">Whole pitch keeps everything on screen. Follow the ball zooms in and tracks play.</p>
+      <button class="btn ghost" data-back="menu">Back</button>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="end">
+    <div class="panel">
+      <p class="fulltime">Full time</p>
+      <div class="final">
+        <div class="final-side">
+          <span class="tag red" id="end-red-name">Red</span>
+          <strong id="end-red-score">0</strong>
+        </div>
+        <div class="final-side">
+          <span class="tag blue" id="end-blue-name">Blue</span>
+          <strong id="end-blue-score">0</strong>
+        </div>
+      </div>
+      <p class="verdict" id="end-verdict">Draw</p>
+      <button class="btn primary" id="btn-rematch">Play again</button>
+      <button class="btn ghost" id="btn-menu">Back to menu</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- -------------------------------------------------------------- overlays -->
+<div id="rotate" class="overlay hidden">
+  <div class="rotate-icon" aria-hidden="true">
+    <svg viewBox="0 0 64 64"><rect x="16" y="6" width="32" height="52" rx="6"/><path d="M8 40a24 24 0 0 0 12 14M56 24a24 24 0 0 0-12-14"/></svg>
+  </div>
+  <p>Turn your device sideways to play.</p>
+</div>
+
+<div id="connection" class="overlay hidden">
+  <div class="spinner" aria-hidden="true"></div>
+  <p id="connection-text">Connecting</p>
+  <button class="btn tiny" id="btn-retry">Try again</button>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<div id="debug" class="debug hidden">
+  <span id="dbg-fps">fps 0</span>
+  <span id="dbg-ping">ping –</span>
+  <span id="dbg-tick">tick 0</span>
+  <span id="dbg-players">players 0</span>
+</div>
+
+<script type="module">
+import { NET, TICK_DT, FIELD, GOAL, PLAYER, STAMINA, BALL, KICK, MATCH, ROOM, TEAM, TEAM_COLORS, NAME_MAX_LENGTH, PHASE, spawnPositions, GOAL_CENTER, TARGET_GOAL, integratePlayer } from '/core.js';
+
+
+
+/* ---------------------------------------------- Camera */
+// Two camera modes. "Whole pitch" keeps everything visible (best for 1v1);
+// "Follow" zooms in and tracks play. Both move with easing, never snap.
+
+
+const MARGIN = FIELD.BORDER + GOAL.DEPTH;
+
+class Camera {
+  constructor() {
+    this.x = FIELD.W / 2;
+    this.y = FIELD.H / 2;
+    this.scale = 1;
+    this.mode = localStorage.getItem('sl.camera') || 'fit';
+    this.shake = 0;
+    this.shakeX = 0;
+    this.shakeY = 0;
+  }
+
+  setMode(mode) { this.mode = mode; localStorage.setItem('sl.camera', mode); }
+
+  addShake(amount) { this.shake = Math.min(this.shake + amount, 26); }
+
+  fitScale(cw, ch) {
+    return Math.min(cw / (FIELD.W + MARGIN * 2), ch / (FIELD.H + MARGIN * 2));
+  }
+
+  update(dt, cw, ch, focus) {
+    const fit = this.fitScale(cw, ch);
+    const target = this.mode === 'follow' ? fit * 1.45 : fit;
+    this.scale += (target - this.scale) * Math.min(1, dt * 6);
+
+    let tx = FIELD.W / 2, ty = FIELD.H / 2;
+    if (this.mode === 'follow' && focus) {
+      tx = focus.x; ty = focus.y;
+      // Keep the camera inside the pitch so we never show empty space.
+      const halfW = cw / 2 / this.scale;
+      const halfH = ch / 2 / this.scale;
+      const minX = Math.min(FIELD.W / 2, -MARGIN + halfW);
+      const maxX = Math.max(FIELD.W / 2, FIELD.W + MARGIN - halfW);
+      const minY = Math.min(FIELD.H / 2, -MARGIN + halfH);
+      const maxY = Math.max(FIELD.H / 2, FIELD.H + MARGIN - halfH);
+      tx = Math.max(minX, Math.min(maxX, tx));
+      ty = Math.max(minY, Math.min(maxY, ty));
+    }
+
+    const ease = Math.min(1, dt * 5.5);
+    this.x += (tx - this.x) * ease;
+    this.y += (ty - this.y) * ease;
+
+    if (this.shake > 0.2) {
+      this.shake *= Math.pow(0.0015, dt);
+      this.shakeX = (Math.random() - 0.5) * this.shake;
+      this.shakeY = (Math.random() - 0.5) * this.shake;
+    } else {
+      this.shake = 0; this.shakeX = 0; this.shakeY = 0;
+    }
+  }
+
+}
+
+/* ---------------------------------------------- Field */
+// The pitch is drawn once into an offscreen canvas and blitted every frame.
+// Redrawing ~40 vector paths at 60fps is exactly what kills Safari on an iPad.
+
+
+// The cached image carries a generous grass runoff so no matter how wide or
+// short the device is, the player never sees a black bar past the touchline.
+const RUNOFF_X = 360;
+const RUNOFF_Y = 190;
+const M = RUNOFF_X + GOAL.DEPTH;
+
+class Field {
+  constructor() { this.cache = null; }
+
+  /** World-space top-left of the cached image. */
+  get originX() { return -M; }
+  get originY() { return -RUNOFF_Y; }
+
+  build() {
+    const w = FIELD.W + M * 2;
+    const h = FIELD.H + RUNOFF_Y * 2;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+
+    g.translate(M, RUNOFF_Y);          // now (0,0) is the corner flag
+
+    // --- turf with mown stripes ------------------------------------------
+    g.fillStyle = '#14532b';
+    g.fillRect(-M, -RUNOFF_Y, w, h);
+    const stripes = 12;
+    const sw = FIELD.W / stripes;
+    for (let i = 0; i < stripes; i++) {
+      g.fillStyle = i % 2 ? '#1e7a3e' : '#1a6c37';
+      g.fillRect(i * sw, 0, sw, FIELD.H);
+    }
+    // vignette so the middle reads as floodlit
+    const vg = g.createRadialGradient(FIELD.W / 2, FIELD.H / 2, FIELD.H * 0.25,
+                                      FIELD.W / 2, FIELD.H / 2, FIELD.W * 0.78);
+    vg.addColorStop(0, 'rgba(255,255,255,.07)');
+    vg.addColorStop(1, 'rgba(0,0,0,.34)');
+    g.fillStyle = vg;
+    g.fillRect(-M, -RUNOFF_Y, w, h);
+
+    // --- chalk -----------------------------------------------------------
+    g.strokeStyle = 'rgba(255,255,255,.72)';
+    g.lineWidth = 3;
+    g.lineCap = 'square';
+
+    g.strokeRect(0, 0, FIELD.W, FIELD.H);
+
+    g.beginPath();
+    g.moveTo(FIELD.W / 2, 0); g.lineTo(FIELD.W / 2, FIELD.H);
+    g.stroke();
+
+    g.beginPath();
+    g.arc(FIELD.W / 2, FIELD.H / 2, 82, 0, Math.PI * 2);
+    g.stroke();
+
+    g.beginPath();
+    g.arc(FIELD.W / 2, FIELD.H / 2, 5, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,.72)';
+    g.fill();
+
+    const boxW = 150, boxH = 320, sixW = 62, sixH = 170;
+    const cy = FIELD.H / 2;
+    for (const side of [0, 1]) {
+      const x = side === 0 ? 0 : FIELD.W - boxW;
+      const sx = side === 0 ? 0 : FIELD.W - sixW;
+      g.strokeRect(x, cy - boxH / 2, boxW, boxH);
+      g.strokeRect(sx, cy - sixH / 2, sixW, sixH);
+
+      const spotX = side === 0 ? 108 : FIELD.W - 108;
+      g.beginPath(); g.arc(spotX, cy, 4, 0, Math.PI * 2); g.fill();
+
+      // penalty arc, clipped to outside the box
+      g.beginPath();
+      const a = side === 0 ? -Math.PI / 2.55 : Math.PI - Math.PI / 2.55;
+      const b = side === 0 ? Math.PI / 2.55 : Math.PI + Math.PI / 2.55;
+      g.arc(spotX, cy, 74, a, b, side === 1);
+      g.stroke();
+    }
+
+    // corner arcs
+    for (const [cx2, cy2, s, e] of [
+      [0, 0, 0, Math.PI / 2],
+      [FIELD.W, 0, Math.PI / 2, Math.PI],
+      [FIELD.W, FIELD.H, Math.PI, Math.PI * 1.5],
+      [0, FIELD.H, Math.PI * 1.5, Math.PI * 2]
+    ]) { g.beginPath(); g.arc(cx2, cy2, 16, s, e); g.stroke(); }
+
+    // --- goals -----------------------------------------------------------
+    const mouthTop = cy - GOAL.MOUTH / 2;
+    for (const side of [0, 1]) {
+      const outward = side === 0 ? -1 : 1;
+      const lineX = side === 0 ? 0 : FIELD.W;
+      const netX = lineX + outward * GOAL.DEPTH;
+
+      g.fillStyle = 'rgba(4,10,16,.55)';
+      g.beginPath();
+      g.moveTo(lineX, mouthTop);
+      g.lineTo(netX, mouthTop);
+      g.lineTo(netX, mouthTop + GOAL.MOUTH);
+      g.lineTo(lineX, mouthTop + GOAL.MOUTH);
+      g.closePath();
+      g.fill();
+
+      // net mesh
+      g.save();
+      g.clip();
+      g.strokeStyle = 'rgba(255,255,255,.22)';
+      g.lineWidth = 1;
+      for (let i = 0; i <= GOAL.DEPTH; i += 9) {
+        const x = lineX + outward * i;
+        g.beginPath(); g.moveTo(x, mouthTop); g.lineTo(x, mouthTop + GOAL.MOUTH); g.stroke();
+      }
+      for (let y = mouthTop; y <= mouthTop + GOAL.MOUTH; y += 9) {
+        g.beginPath(); g.moveTo(lineX, y); g.lineTo(netX, y); g.stroke();
+      }
+      g.restore();
+
+      // posts and crossbar frame
+      g.strokeStyle = '#f2f7f5';
+      g.lineWidth = GOAL.POST_R * 1.6;
+      g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(lineX, mouthTop);
+      g.lineTo(netX, mouthTop);
+      g.moveTo(lineX, mouthTop + GOAL.MOUTH);
+      g.lineTo(netX, mouthTop + GOAL.MOUTH);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(netX, mouthTop);
+      g.lineTo(netX, mouthTop + GOAL.MOUTH);
+      g.stroke();
+    }
+
+    this.cache = c;
+  }
+
+  draw(ctx) {
+    if (!this.cache) this.build();
+    ctx.drawImage(this.cache, this.originX, this.originY);
+  }
+}
+
+/* ---------------------------------------------- Player */
+// Drawing only. Positions always come from the server via interpolation.
+
+
+function drawPlayer(ctx, p, opts = {}) {
+  const { isSelf = false, name = '', charge = 0, sprinting = false, offline = false } = opts;
+  const col = TEAM_COLORS[p.t] || TEAM_COLORS.RED;
+  const r = PLAYER.RADIUS;
+
+  ctx.save();
+  ctx.globalAlpha = offline ? 0.4 : 1;
+
+  // grounded shadow
+  ctx.fillStyle = 'rgba(0,0,0,.34)';
+  ctx.beginPath();
+  ctx.ellipse(p.x + 2, p.y + r * 0.55, r * 0.94, r * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // "this is you" chalk ring
+  if (isSelf) {
+    ctx.strokeStyle = 'rgba(255,255,255,.9)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + r * 0.55, r * 1.25, r * 0.62, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // body
+  const grad = ctx.createLinearGradient(p.x, p.y - r, p.x, p.y + r);
+  grad.addColorStop(0, col.main);
+  grad.addColorStop(1, col.dark);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255,255,255,.85)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // facing marker: a small arrow that rides the rim and points where you face
+  const a = p.f;
+  ctx.save();
+  ctx.translate(p.x + Math.cos(a) * (r + 9), p.y + Math.sin(a) * (r + 9));
+  ctx.rotate(a);
+  ctx.beginPath();
+  ctx.moveTo(6.5, 0);
+  ctx.lineTo(-4, 4.2);
+  ctx.lineTo(-4, -4.2);
+  ctx.closePath();
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(6,14,10,.55)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.restore();
+
+  // shot charge ring
+  if (charge > 0.02) {
+    ctx.strokeStyle = charge > 0.85 ? '#ffd24a' : '#ff9e48';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r + 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * charge);
+    ctx.stroke();
+  }
+
+  if (sprinting) {
+    ctx.strokeStyle = 'rgba(255,255,255,.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x - Math.cos(a) * (r + 5), p.y - Math.sin(a) * (r + 5), r * 0.8, a - 1.1, a + 1.1);
+    ctx.stroke();
+  }
+
+  // name plate
+  if (name) {
+    ctx.font = '600 13px -apple-system, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    const w = ctx.measureText(name).width;
+    ctx.fillStyle = 'rgba(4,10,16,.62)';
+    ctx.beginPath();
+    ctx.roundRect(p.x - w / 2 - 7, p.y - r - 26, w + 14, 19, 9);
+    ctx.fill();
+    ctx.fillStyle = offline ? 'rgba(255,255,255,.5)' : '#fff';
+    ctx.fillText(offline ? '· · ·' : name, p.x, p.y - r - 12);
+  }
+
+  ctx.restore();
+}
+
+/* ---------------------------------------------- Ball */
+class BallView {
+  constructor() { this.trail = []; }
+
+  update(x, y, speed) {
+    this.trail.push({ x, y, life: 1 });
+    if (this.trail.length > 14) this.trail.shift();
+    for (const t of this.trail) t.life -= speed > 450 ? 0.075 : 0.16;
+    this.trail = this.trail.filter((t) => t.life > 0);
+  }
+
+  draw(ctx, x, y, speed) {
+    const r = BALL.RADIUS;
+
+    if (speed > 340) {
+      for (const t of this.trail) {
+        ctx.fillStyle = `rgba(255,255,255,${0.26 * t.life * t.life})`;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, r * t.life, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.fillStyle = 'rgba(0,0,0,.36)';
+    ctx.beginPath();
+    ctx.ellipse(x + 2.5, y + r * 0.7, r * 0.95, r * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.15, x, y, r);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(1, '#c8d4d0');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(20,30,26,.75)';
+    const spin = (x + y) * 0.05;
+    for (let i = 0; i < 3; i++) {
+      const a = spin + (i * Math.PI * 2) / 3;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * r * 0.45, y + Math.sin(a) * r * 0.45, r * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/* ---------------------------------------------- Effects */
+// Particles, screen flash and confetti. Capped hard so an iPad never chokes.
+const MAX_PARTICLES = 160;
+
+class Effects {
+  constructor() {
+    this.particles = [];
+    this.flash = 0;
+    this.flashColor = '255,255,255';
+  }
+
+  burst(x, y, count, color, speed = 260, life = 0.7) {
+    const room = MAX_PARTICLES - this.particles.length;
+    const n = Math.min(count, Math.max(0, room));
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = speed * (0.35 + Math.random() * 0.65);
+      this.particles.push({
+        x, y,
+        vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life, max: life, color,
+        size: 2 + Math.random() * 3.5
+      });
+    }
+  }
+
+  goalBurst(x, y, color) {
+    this.burst(x, y, 70, color, 420, 1.1);
+    this.burst(x, y, 30, '255,255,255', 300, 0.9);
+    this.flash = 0.7;
+    this.flashColor = color;
+  }
+
+  update(dt) {
+    for (const p of this.particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= Math.pow(0.12, dt);
+      p.vy *= Math.pow(0.12, dt);
+      p.life -= dt;
+    }
+    if (this.particles.length) this.particles = this.particles.filter((p) => p.life > 0);
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 1.6);
+  }
+
+  draw(ctx) {
+    for (const p of this.particles) {
+      const a = p.life / p.max;
+      ctx.fillStyle = `rgba(${p.color},${a})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * a, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawFlash(ctx, w, h) {
+    if (this.flash <= 0) return;
+    ctx.fillStyle = `rgba(${this.flashColor},${this.flash * 0.34})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+/* ---------------------------------------------- Sound */
+// Every sound is synthesised with the Web Audio API — no audio files to load,
+// which keeps the whole game a few hundred kilobytes and instant on a phone.
+// Nothing plays until the first real user gesture (iOS autoplay rules).
+
+class Sound {
+  constructor() {
+    this.ctx = null;
+    this.enabled = localStorage.getItem('sl.sound') !== 'off';
+    this.master = null;
+  }
+
+  unlock() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.55;
+    this.master.connect(this.ctx.destination);
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  setEnabled(on) {
+    this.enabled = on;
+    localStorage.setItem('sl.sound', on ? 'on' : 'off');
+  }
+
+  get ok() { return this.enabled && this.ctx && this.ctx.state === 'running'; }
+
+  tone(freq, dur, type = 'sine', gain = 0.3, slideTo = null) {
+    if (!this.ok) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t + dur);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g).connect(this.master);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  noise(dur, gain = 0.3, filterHz = 1200, q = 1, sweepTo = null) {
+    if (!this.ok) return;
+    const t = this.ctx.currentTime;
+    const frames = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, frames, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.setValueAtTime(filterHz, t);
+    filt.Q.value = q;
+    if (sweepTo) filt.frequency.exponentialRampToValueAtTime(sweepTo, t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(filt).connect(g).connect(this.master);
+    src.start(t);
+  }
+
+  kick(power = 1) {
+    this.noise(0.07, 0.32 * power, 900, 0.8);
+    this.tone(150 + 90 * power, 0.11, 'triangle', 0.34 * power, 60);
+  }
+  pass()   { this.noise(0.05, 0.2, 1500, 1); this.tone(230, 0.07, 'triangle', 0.2, 140); }
+  post()   { this.tone(880, 0.22, 'square', 0.16, 620); }
+  click()  { this.tone(680, 0.045, 'square', 0.12, 520); }
+  beep()   { this.tone(660, 0.14, 'square', 0.22); }
+
+  whistle() {
+    if (!this.ok) return;
+    const t = this.ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const lfo = this.ctx.createOscillator();
+      const lfoGain = this.ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 2050 + i * 90;
+      lfo.frequency.value = 34;
+      lfoGain.gain.value = 90;
+      lfo.connect(lfoGain).connect(osc.frequency);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.65);
+      osc.connect(g).connect(this.master);
+      osc.start(t); lfo.start(t);
+      osc.stop(t + 0.7); lfo.stop(t + 0.7);
+    }
+  }
+
+  goal() {
+    if (!this.ok) return;
+    this.whistle();
+    // Crowd swell: filtered noise rising, then a bright major triad.
+    this.noise(1.5, 0.2, 500, 0.6, 2600);
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((f, i) => setTimeout(() => this.tone(f, 0.45, 'triangle', 0.2), i * 85));
+  }
+
+  matchStart() {
+    this.whistle();
+    setTimeout(() => this.tone(392, 0.2, 'triangle', 0.2), 120);
+    setTimeout(() => this.tone(587, 0.3, 'triangle', 0.2), 280);
+  }
+
+  fullTime() {
+    this.whistle();
+    setTimeout(() => this.whistle(), 260);
+    setTimeout(() => this.whistle(), 520);
+  }
+}
+
+const sound = new Sound();
+
+/* ---------------------------------------------- NetworkClient */
+// Thin WebSocket wrapper: reconnects on its own, measures ping, and hands
+// every server message to whoever subscribed. Never sends game positions.
+
+
+class NetworkClient {
+  constructor() {
+    this.ws = null;
+    this.handlers = new Map();
+    this.connected = false;
+    this.ping = 0;
+    // sessionStorage, not localStorage: each tab is its own player, and the id
+    // still survives a page refresh so mid-match reconnects work.
+    this.sessionId = sessionStorage.getItem('sl.sid') || null;
+    this.name = localStorage.getItem('sl.name') || '';
+    this.reconnectAttempts = 0;
+    this.manualClose = false;
+  }
+
+  on(type, fn) {
+    if (!this.handlers.has(type)) this.handlers.set(type, new Set());
+    this.handlers.get(type).add(fn);
+    return () => this.handlers.get(type).delete(fn);
+  }
+
+  emit(type, payload) {
+    this.handlers.get(type)?.forEach((fn) => fn(payload));
+    this.handlers.get('*')?.forEach((fn) => fn(type, payload));
+  }
+
+  url() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${location.host}`;
+  }
+
+  connect() {
+    this.manualClose = false;
+    if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
+
+    this.emit('status', 'connecting');
+    let ws;
+    try { ws = new WebSocket(this.url()); }
+    catch { return this.scheduleReconnect(); }
+    this.ws = ws;
+
+    ws.onopen = () => {
+      this.connected = true;
+      this.reconnectAttempts = 0;
+      this.send({ t: 'hello', name: this.name, sid: this.sessionId });
+      this.startPing();
+      this.emit('status', 'open');
+    };
+
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.t === 'welcome') {
+        this.sessionId = msg.id;
+        sessionStorage.setItem('sl.sid', msg.id);
+      }
+      if (msg.t === 'pong') { this.ping = Math.round(performance.now() - msg.ts); return; }
+      this.emit(msg.t, msg);
+    };
+
+    ws.onclose = () => {
+      this.connected = false;
+      clearInterval(this.pingTimer);
+      this.emit('status', 'closed');
+      if (!this.manualClose) this.scheduleReconnect();
+    };
+
+    ws.onerror = () => { /* onclose always follows */ };
+  }
+
+  scheduleReconnect() {
+    this.reconnectAttempts++;
+    const wait = Math.min(1000 * this.reconnectAttempts, 6000);
+    this.emit('status', 'reconnecting');
+    clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => this.connect(), wait);
+  }
+
+  startPing() {
+    clearInterval(this.pingTimer);
+    this.pingTimer = setInterval(() => {
+      this.send({ t: 'ping', ts: performance.now() });
+    }, NET.PING_INTERVAL_MS);
+  }
+
+  send(obj) {
+    if (this.ws && this.ws.readyState === 1) {
+      try { this.ws.send(JSON.stringify(obj)); } catch {}
+    }
+  }
+
+  setName(name) {
+    this.name = name;
+    localStorage.setItem('sl.name', name);
+    this.send({ t: 'hello', name, sid: this.sessionId });
+  }
+
+  createRoom()      { this.send({ t: 'create' }); }
+  joinRoom(code)    { this.send({ t: 'join', code }); }
+  quickMatch()      { this.send({ t: 'quick' }); }
+  pickTeam(team)    { this.send({ t: 'team', team }); }
+  startMatch()      { this.send({ t: 'start' }); }
+  rematch()         { this.send({ t: 'rematch' }); }
+  leaveRoom()       { this.send({ t: 'leave' }); }
+  sendInput(input)  { this.send({ t: 'input', ...input }); }
+}
+
+/* ---------------------------------------------- TouchControls */
+// Virtual stick + action buttons, built for a thumb on glass.
+// The stick keeps tracking even when the finger slides outside its ring.
+
+class TouchControls {
+  constructor(root) {
+    this.stick = root.querySelector('#stick');
+    this.knob = root.querySelector('#stick-knob');
+    this.chargeEl = root.querySelector('#shoot-charge');
+    this.staminaArc = root.querySelector('#stamina-arc');
+
+    this.axis = { x: 0, y: 0 };
+    this.buttons = { shoot: false, pass: false, sprint: false };
+    this.pointerId = null;
+    this.enabled = false;
+    this.radius = 55;
+
+    this.bindStick();
+    this.bindButton('#btn-shoot', 'shoot');
+    this.bindButton('#btn-pass', 'pass');
+    this.bindButton('#btn-sprint', 'sprint');
+  }
+
+  bindStick() {
+    const el = this.stick;
+
+    const start = (e) => {
+      if (!this.enabled) return;
+      const t = e.changedTouches ? e.changedTouches[0] : e;
+      this.pointerId = t.identifier ?? 'mouse';
+      const r = el.getBoundingClientRect();
+      this.origin = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      this.radius = r.width / 2 - 14;
+      el.classList.add('active');
+      this.move(t);
+      e.preventDefault();
+    };
+
+    const move = (e) => {
+      if (this.pointerId === null) return;
+      const t = this.findTouch(e);
+      if (!t) return;
+      this.move(t);
+      e.preventDefault();
+    };
+
+    const end = (e) => {
+      if (this.pointerId === null) return;
+      if (e.changedTouches && !this.findTouch(e, true)) return;
+      this.pointerId = null;
+      this.axis.x = 0; this.axis.y = 0;
+      this.knob.style.transform = 'translate(0px, 0px)';
+      el.classList.remove('active');
+    };
+
+    el.addEventListener('touchstart', start, { passive: false });
+    // Listen on window so the thumb can wander off the ring mid-sprint.
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', end);
+    window.addEventListener('touchcancel', end);
+
+    el.addEventListener('mousedown', start);
+    window.addEventListener('mousemove', (e) => { if (this.pointerId === 'mouse') move(e); });
+    window.addEventListener('mouseup', end);
+  }
+
+  findTouch(e, changed = false) {
+    const list = changed ? e.changedTouches : (e.touches || e.changedTouches);
+    if (!list) return this.pointerId === 'mouse' ? e : null;
+    for (const t of list) if (t.identifier === this.pointerId) return t;
+    return null;
+  }
+
+  move(t) {
+    let dx = t.clientX - this.origin.x;
+    let dy = t.clientY - this.origin.y;
+    const d = Math.hypot(dx, dy);
+    const max = this.radius;
+    const clamped = Math.min(d, max);
+    const nx = d ? dx / d : 0;
+    const ny = d ? dy / d : 0;
+
+    this.knob.style.transform = `translate(${nx * clamped}px, ${ny * clamped}px)`;
+    // Small dead zone so a resting thumb does not drift the player.
+    const mag = d < 8 ? 0 : Math.min(d / max, 1);
+    this.axis.x = nx * mag;
+    this.axis.y = ny * mag;
+  }
+
+  bindButton(selector, key) {
+    const el = document.querySelector(selector);
+    if (!el) return;
+    const down = (e) => {
+      if (!this.enabled) return;
+      this.buttons[key] = true;
+      el.classList.add('pressed');
+      e.preventDefault();
+    };
+    const up = (e) => {
+      this.buttons[key] = false;
+      el.classList.remove('pressed');
+      if (e.cancelable) e.preventDefault();
+    };
+    el.addEventListener('touchstart', down, { passive: false });
+    el.addEventListener('touchend', up, { passive: false });
+    el.addEventListener('touchcancel', up);
+    el.addEventListener('mousedown', down);
+    el.addEventListener('mouseup', up);
+    el.addEventListener('mouseleave', up);
+  }
+
+  setEnabled(on) {
+    this.enabled = on;
+    document.getElementById('touch').classList.toggle('hidden', !on);
+    if (!on) {
+      this.axis.x = 0; this.axis.y = 0;
+      this.buttons = { shoot: false, pass: false, sprint: false };
+      this.knob.style.transform = 'translate(0px,0px)';
+    }
+  }
+
+  /** Feedback from the authoritative state: charge bar and stamina ring. */
+  render(charge, stamina) {
+    this.chargeEl.style.height = `${Math.round(charge * 100)}%`;
+    const C = 289;
+    this.staminaArc.style.strokeDashoffset = String(C - C * (stamina / 100));
+    this.staminaArc.classList.toggle('low', stamina < 35);
+  }
+}
+
+/* ---------------------------------------------- KeyboardControls */
+// Desktop controls, mostly for testing two tabs side by side.
+// WASD / arrows move, Shift sprints, Space shoots (hold to charge), E passes.
+
+class KeyboardControls {
+  constructor() {
+    this.keys = new Set();
+    this.enabled = false;
+    const isTyping = (e) => ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
+
+    window.addEventListener('keydown', (e) => {
+      if (isTyping(e)) return;
+      this.keys.add(e.code);
+      if (this.enabled && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault();
+      }
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  get axis() {
+    const k = this.keys;
+    let x = 0, y = 0;
+    if (k.has('KeyA') || k.has('ArrowLeft'))  x -= 1;
+    if (k.has('KeyD') || k.has('ArrowRight')) x += 1;
+    if (k.has('KeyW') || k.has('ArrowUp'))    y -= 1;
+    if (k.has('KeyS') || k.has('ArrowDown'))  y += 1;
+    const m = Math.hypot(x, y);
+    return m > 1 ? { x: x / m, y: y / m } : { x, y };
+  }
+
+  get buttons() {
+    return {
+      shoot:  this.keys.has('Space'),
+      pass:   this.keys.has('KeyE'),
+      sprint: this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')
+    };
+  }
+
+  setEnabled(on) { this.enabled = on; if (!on) this.keys.clear(); }
+}
+
+/* ---------------------------------------------- UI */
+// Screen router + every DOM interaction. Keeps the canvas free of layout work.
+
+
+class UI {
+  constructor(sound) {
+    this.sound = sound;
+    this.screens = [...document.querySelectorAll('.screen')];
+    this.current = 'name';
+    this.handlers = {};
+    this.bind();
+  }
+
+  on(name, fn) { this.handlers[name] = fn; }
+  call(name, ...args) { this.handlers[name]?.(...args); }
+
+  show(name) {
+    this.current = name;
+    for (const s of this.screens) s.classList.toggle('active', s.dataset.screen === name);
+    const inMatch = name === 'match';
+    document.getElementById('hud').classList.toggle('hidden', !inMatch);
+    this.call('screenChange', name);
+  }
+
+  bind() {
+    const $ = (id) => document.getElementById(id);
+    const tap = (el, fn) => el && el.addEventListener('click', () => { this.sound.click(); fn(); });
+
+    const nameInput = $('input-name');
+    nameInput.value = localStorage.getItem('sl.name') || '';
+
+    tap($('btn-continue'), () => {
+      const value = nameInput.value.trim().slice(0, NAME_MAX_LENGTH);
+      if (!value) { this.toast('Type a name first.'); nameInput.focus(); return; }
+      this.call('setName', value);
+      this.show('menu');
+    });
+    nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-continue').click(); });
+
+    tap($('btn-quick'), () => this.call('quickMatch'));
+    tap($('btn-create'), () => this.call('createRoom'));
+    tap($('btn-join-screen'), () => { this.show('join'); $('input-code').focus(); });
+    tap($('btn-settings'), () => this.show('settings'));
+    tap($('greet'), () => { nameInput.value = localStorage.getItem('sl.name') || ''; this.show('name'); });
+
+    const codeInput = $('input-code');
+    codeInput.addEventListener('input', () => {
+      codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    });
+    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-join').click(); });
+    tap($('btn-join'), () => {
+      const code = codeInput.value.trim();
+      if (code.length < 5) { this.toast('Room codes are five characters.'); return; }
+      this.call('joinRoom', code);
+    });
+
+    tap($('btn-start'), () => this.call('startMatch'));
+    tap($('btn-leave'), () => { this.call('leaveRoom'); this.show('menu'); });
+    tap($('btn-copy'), () => this.copyInvite());
+    tap($('btn-rematch'), () => this.call('rematch'));
+    tap($('btn-menu'), () => { this.call('leaveRoom'); this.show('menu'); });
+    tap($('btn-retry'), () => this.call('retry'));
+
+    document.querySelectorAll('.team').forEach((btn) => {
+      tap(btn, () => this.call('pickTeam', btn.dataset.team));
+    });
+    document.querySelectorAll('[data-back]').forEach((btn) => {
+      tap(btn, () => this.show(btn.dataset.back));
+    });
+
+    // --- settings toggles ---
+    const soundBtn = $('set-sound');
+    const camBtn = $('set-camera');
+    const dbgBtn = $('set-debug');
+
+    this.setToggle(soundBtn, this.sound.enabled, 'On', 'Off');
+    tap(soundBtn, () => {
+      const on = !this.sound.enabled;
+      this.sound.setEnabled(on);
+      this.setToggle(soundBtn, on, 'On', 'Off');
+    });
+
+    const camMode = localStorage.getItem('sl.camera') || 'fit';
+    this.setToggle(camBtn, camMode === 'follow', 'Follow ball', 'Whole pitch');
+    tap(camBtn, () => {
+      const next = (localStorage.getItem('sl.camera') || 'fit') === 'fit' ? 'follow' : 'fit';
+      this.call('setCamera', next);
+      this.setToggle(camBtn, next === 'follow', 'Follow ball', 'Whole pitch');
+    });
+
+    const dbgOn = localStorage.getItem('sl.debug') === 'on';
+    this.setToggle(dbgBtn, dbgOn, 'On', 'Off');
+    document.getElementById('debug').classList.toggle('hidden', !dbgOn);
+    tap(dbgBtn, () => {
+      const on = localStorage.getItem('sl.debug') !== 'on';
+      localStorage.setItem('sl.debug', on ? 'on' : 'off');
+      this.setToggle(dbgBtn, on, 'On', 'Off');
+      document.getElementById('debug').classList.toggle('hidden', !on);
+    });
+  }
+
+  setToggle(btn, on, labelOn, labelOff) {
+    btn.classList.toggle('on', on);
+    btn.textContent = on ? labelOn : labelOff;
+  }
+
+  // ------------------------------------------------------------------ room
+
+  renderRoom(room, selfId) {
+    document.getElementById('room-code').textContent = room.code;
+    this.roomCode = room.code;
+
+    const slots = [document.getElementById('slot-0'), document.getElementById('slot-1')];
+    slots.forEach((slot, i) => {
+      const p = room.players[i];
+      slot.classList.remove('red', 'blue', 'empty');
+      if (!p) {
+        slot.classList.add('empty');
+        slot.querySelector('.slot-name').textContent = 'Waiting for a player';
+        slot.querySelector('.slot-team').textContent = '';
+        slot.querySelector('.slot-role').textContent = i === 0 ? 'Host' : 'Challenger';
+        return;
+      }
+      slot.classList.add(p.team.toLowerCase());
+      slot.querySelector('.slot-name').textContent = p.name + (p.id === selfId ? ' (you)' : '');
+      slot.querySelector('.slot-team').textContent = p.team === TEAM.RED ? 'Red' : 'Blue';
+      slot.querySelector('.slot-role').textContent = p.host ? 'Host' : 'Challenger';
+    });
+
+    const me = room.players.find((p) => p.id === selfId);
+    const takenByOther = new Set(room.players.filter((p) => p.id !== selfId).map((p) => p.team));
+    document.querySelectorAll('.team').forEach((btn) => {
+      const t = btn.dataset.team;
+      btn.classList.toggle('picked', me?.team === t);
+      btn.disabled = takenByOther.has(t);
+    });
+
+    const isHost = room.hostId === selfId;
+    const startBtn = document.getElementById('btn-start');
+    startBtn.disabled = !isHost || room.players.length < 2;
+    startBtn.textContent = !isHost
+      ? 'Waiting for the host'
+      : room.players.length < 2 ? 'Waiting for a player' : 'Start match';
+  }
+
+  async copyInvite() {
+    const url = `${location.origin}/?room=${this.roomCode}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      this.toast('Invite link copied.', true);
+    } catch {
+      this.toast(url, true);
+    }
+  }
+
+  // ------------------------------------------------------------------- HUD
+
+  setMatchNames(redName, blueName) {
+    document.getElementById('hud-red-name').textContent = redName || 'Red';
+    document.getElementById('hud-blue-name').textContent = blueName || 'Blue';
+  }
+
+  setScore(red, blue) {
+    document.getElementById('hud-red-score').textContent = red;
+    document.getElementById('hud-blue-score').textContent = blue;
+  }
+
+  setClock(seconds) {
+    const s = Math.max(0, Math.ceil(seconds));
+    const el = document.getElementById('hud-clock');
+    el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    el.classList.toggle('urgent', s <= 15);
+  }
+
+  showEnd(score, winner, names) {
+    document.getElementById('end-red-name').textContent = names.RED || 'Red';
+    document.getElementById('end-blue-name').textContent = names.BLUE || 'Blue';
+    document.getElementById('end-red-score').textContent = score.RED;
+    document.getElementById('end-blue-score').textContent = score.BLUE;
+    document.getElementById('end-verdict').textContent = winner
+      ? `${names[winner] || winner} wins`
+      : 'Honours even';
+    this.show('end');
+  }
+
+  // -------------------------------------------------------------- overlays
+
+  connection(text) {
+    const el = document.getElementById('connection');
+    if (!text) { el.classList.add('hidden'); return; }
+    document.getElementById('connection-text').textContent = text;
+    el.classList.remove('hidden');
+  }
+
+  toast(message, neutral = false) {
+    const el = document.getElementById('toast');
+    el.textContent = message;
+    el.style.background = neutral ? 'rgba(47,123,255,.92)' : 'rgba(255,59,82,.92)';
+    el.classList.remove('hidden');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => el.classList.add('hidden'), 2600);
+  }
+
+  setGreeting(name) {
+    document.getElementById('greet').textContent = `Playing as ${name}`;
+  }
+}
+
+/* ---------------------------------------------- Game */
+// Renders the match. Owns no truth: it buffers server snapshots, plays them back
+// ~90ms in the past with interpolation, and predicts only your own player so the
+// stick feels instant.
+
+
+
+
+
+
+
+
+class Game {
+  constructor(canvas, sound) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { alpha: false });
+    this.sound = sound;
+    this.camera = new Camera();
+    this.field = new Field();
+    this.ballView = new BallView();
+    this.fx = new Effects();
+
+    this.snapshots = [];
+    this.selfId = null;
+    this.names = new Map();
+    this.running = false;
+    this.banner = null;          // { text, sub, until, color }
+    this.lastCountdownBeep = -1;
+    // Client-side prediction. `pending` holds every input sent but not yet
+    // acknowledged by the server; they are replayed on top of each snapshot.
+    this.pending = [];
+    this.predicted = null;
+    this.predPrev = null;
+    this.lastStepAt = 0;
+    this.err = { x: 0, y: 0 };      // visible correction, eased away not snapped
+
+    this.fps = 0;
+    this.frames = 0;
+    this.fpsTimer = 0;
+    this.dpr = 1;
+
+    this.onResize = this.onResize.bind(this);
+    window.addEventListener('resize', this.onResize);
+    window.addEventListener('orientationchange', () => setTimeout(this.onResize, 250));
+    this.onResize();
+  }
+
+  onResize() {
+    // Cap DPR at 2: a 3x buffer on a phone costs frames and buys nothing here.
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.floor(window.innerWidth);
+    const h = Math.floor(window.innerHeight);
+    this.canvas.width = Math.floor(w * this.dpr);
+    this.canvas.height = Math.floor(h * this.dpr);
+    this.canvas.style.width = w + 'px';
+    this.canvas.style.height = h + 'px';
+    this.cssW = w; this.cssH = h;
+  }
+
+  setSelf(id) { this.selfId = id; }
+  setNames(map) { this.names = map; }
+
+  pushSnapshot(msg) {
+    this.snapshots.push({ recvAt: performance.now(), data: msg });
+    while (this.snapshots.length > 24) this.snapshots.shift();
+    this.latest = msg;
+
+    this.reconcile(msg);
+  }
+
+  /**
+   * Take the server's authoritative position for our player, throw away the
+   * inputs it has already seen, and replay the rest. Because the replay uses
+   * the very same integratePlayer the server runs, the result is where we
+   * should be *now* rather than where we were a round trip ago — which is what
+   * stops the player snapping backwards every time a packet lands.
+   */
+  reconcile(msg) {
+    const mine = msg.e.find((e) => e.i === this.selfId);
+    if (!mine) return;
+
+    const before = this.predicted ? { x: this.predicted.x, y: this.predicted.y } : null;
+
+    this.pending = this.pending.filter((p) => p.seq > (mine.q ?? -1));
+
+    const p = {
+      x: mine.x, y: mine.y, vx: mine.vx, vy: mine.vy,
+      fx: Math.cos(mine.f), fy: Math.sin(mine.f),
+      stamina: mine.st, sprinting: false
+    };
+
+    if (msg.p === PHASE.PLAYING) {
+      for (const input of this.pending) {
+        integratePlayer(p, input, TICK_DT);
+        this.separate(p, msg.e);
+      }
+    } else {
+      // Kick-off and celebrations are frozen and teleport everyone, so any
+      // input we predicted through them is meaningless.
+      this.pending.length = 0;
+      this.err.x = 0; this.err.y = 0;
+    }
+
+    this.predicted = p;
+
+    if (before) {
+      // Keep the picture continuous: hold the old position on screen and let
+      // the difference decay over the next few frames.
+      const dx = before.x - p.x, dy = before.y - p.y;
+      const clamp = (v) => Math.max(-70, Math.min(70, v));
+      this.err.x = clamp(this.err.x + dx);
+      this.err.y = clamp(this.err.y + dy);
+      if (this.predPrev) { this.predPrev.x -= dx; this.predPrev.y -= dy; }
+    }
+    if (!this.predPrev) this.predPrev = { x: p.x, y: p.y };
+  }
+
+  /** Advance the prediction one server tick. Called by the input sampler. */
+  stepPrediction(input) {
+    this.pending.push(input);
+    if (this.pending.length > 120) this.pending.shift();
+    if (!this.predicted || !this.state || this.state.p !== PHASE.PLAYING) return;
+    this.predPrev = { x: this.predicted.x, y: this.predicted.y };
+    integratePlayer(this.predicted, input, TICK_DT);
+    this.separate(this.predicted, this.state.e);
+    this.lastStepAt = performance.now();
+  }
+
+  /**
+   * Push our predicted body out of anyone we are overlapping. The server does
+   * the same thing, so doing it here as well means you never see yourself
+   * standing inside your opponent while you wait for the correction.
+   */
+  separate(self, entities) {
+    if (!entities) return;
+    const min = PLAYER.RADIUS * 2;
+    for (const e of entities) {
+      if (e.i === this.selfId) continue;
+      let dx = self.x - e.x, dy = self.y - e.y;
+      let d = Math.hypot(dx, dy);
+      if (d === 0) { dx = 0.01; dy = 0; d = 0.01; }
+      if (d < min) {
+        const push = min - d;
+        self.x += (dx / d) * push;
+        self.y += (dy / d) * push;
+      }
+    }
+    const r = PLAYER.RADIUS;
+    self.x = Math.max(r, Math.min(FIELD.W - r, self.x));
+    self.y = Math.max(r, Math.min(FIELD.H - r, self.y));
+  }
+
+  showBanner(text, sub, seconds, color) {
+    this.banner = { text, sub, until: performance.now() + seconds * 1000, color };
+  }
+
+  /** Blend the two snapshots surrounding the render clock. */
+  sample() {
+    const target = performance.now() - NET.INTERP_DELAY_MS;
+    const s = this.snapshots;
+    if (s.length === 0) return null;
+    if (s.length === 1) return { ...s[0].data, _alpha: 0, _from: s[0].data, _to: s[0].data };
+
+    let a = s[0], b = s[s.length - 1];
+    for (let i = 0; i < s.length - 1; i++) {
+      if (s[i].recvAt <= target && s[i + 1].recvAt >= target) { a = s[i]; b = s[i + 1]; break; }
+      if (s[i + 1].recvAt < target) { a = s[i]; b = s[i + 1]; }
+    }
+    const span = b.recvAt - a.recvAt;
+    const t = span > 0 ? Math.max(0, Math.min(1, (target - a.recvAt) / span)) : 1;
+
+    const lerp = (p, q) => p + (q - p) * t;
+    const lerpAngle = (p, q) => {
+      let d = q - p;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return p + d * t;
+    };
+
+    const A = a.data, B = b.data;
+    const entities = A.e.map((ea) => {
+      const eb = B.e.find((x) => x.i === ea.i) || ea;
+      return {
+        i: ea.i, t: ea.t, st: eb.st, ch: eb.ch, on: eb.on,
+        x: lerp(ea.x, eb.x), y: lerp(ea.y, eb.y),
+        vx: eb.vx, vy: eb.vy,
+        f: lerpAngle(ea.f, eb.f)
+      };
+    });
+
+    return {
+      ...B,
+      b: { x: lerp(A.b.x, B.b.x), y: lerp(A.b.y, B.b.y), vx: B.b.vx, vy: B.b.vy },
+      e: entities
+    };
+  }
+
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.last = performance.now();
+    this.raf = requestAnimationFrame(this.frame.bind(this));
+  }
+
+  stop() {
+    this.running = false;
+    cancelAnimationFrame(this.raf);
+    this.snapshots.length = 0;
+    this.pending.length = 0;
+    this.predicted = null;
+    this.predPrev = null;
+    this.err.x = 0; this.err.y = 0;
+    this.banner = null;
+  }
+
+  frame(now) {
+    if (!this.running) return;
+    const dt = Math.min((now - this.last) / 1000, 0.05);
+    this.last = now;
+
+    this.frames++;
+    this.fpsTimer += dt;
+    if (this.fpsTimer >= 0.5) {
+      this.fps = Math.round(this.frames / this.fpsTimer);
+      this.frames = 0; this.fpsTimer = 0;
+    }
+
+    this.update(dt);
+    this.render(dt);
+    this.raf = requestAnimationFrame(this.frame.bind(this));
+  }
+
+  update(dt) {
+    const state = this.sample();
+    this.state = state;
+    if (!state) return;
+
+    // Prediction is stepped by the input sampler at the server tick rate.
+    // All that is left here is easing away any correction it produced.
+    this.err.x *= Math.pow(0.002, dt);
+    this.err.y *= Math.pow(0.002, dt);
+
+    const self = this.selfView(state);
+    const focus = state.b
+      ? { x: (state.b.x * 2 + (self?.x ?? state.b.x)) / 3,
+          y: (state.b.y * 2 + (self?.y ?? state.b.y)) / 3 }
+      : null;
+
+    this.camera.update(dt, this.cssW, this.cssH, focus);
+    this.fx.update(dt);
+
+    const bs = Math.hypot(state.b.vx, state.b.vy);
+    this.ballView.update(state.b.x, state.b.y, bs);
+
+    if (state.p === PHASE.COUNTDOWN) {
+      const n = Math.ceil(state.cd);
+      if (n !== this.lastCountdownBeep && n > 0) {
+        this.lastCountdownBeep = n;
+        this.sound.beep();
+      }
+    } else {
+      this.lastCountdownBeep = -1;
+    }
+  }
+
+  selfView(state) {
+    if (!state) return null;
+    const server = state.e.find((e) => e.i === this.selfId);
+    if (!server) return null;
+    if (!this.predicted || state.p !== PHASE.PLAYING) return server;
+
+    // Prediction advances 30 times a second but we draw 60, so blend across
+    // the gap between the last two prediction steps.
+    const prev = this.predPrev || this.predicted;
+    const a = Math.max(0, Math.min(1, (performance.now() - this.lastStepAt) / (TICK_DT * 1000)));
+    return {
+      ...server,
+      x: prev.x + (this.predicted.x - prev.x) * a + this.err.x,
+      y: prev.y + (this.predicted.y - prev.y) * a + this.err.y,
+      f: Math.atan2(this.predicted.fy, this.predicted.fx)
+    };
+  }
+
+  render(dt) {
+    const ctx = this.ctx;
+    const { cssW: w, cssH: h, dpr } = this;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#0d2a19';        // deep grass, so any sliver past the
+    ctx.fillRect(0, 0, w, h);         // runoff still reads as a stadium
+
+    const state = this.state;
+    if (!state) return;
+
+    // World transform = device pixel ratio folded into the camera transform.
+    ctx.save();
+    const s = this.camera.scale * dpr;
+    ctx.setTransform(
+      s, 0, 0, s,
+      (w / 2 - this.camera.x * this.camera.scale + this.camera.shakeX) * dpr,
+      (h / 2 - this.camera.y * this.camera.scale + this.camera.shakeY) * dpr
+    );
+
+    this.field.draw(ctx);
+
+    const self = this.selfView(state);
+    for (const e of state.e) {
+      const view = e.i === this.selfId && self ? self : e;
+      drawPlayer(ctx, view, {
+        isSelf: e.i === this.selfId,
+        name: this.names.get(e.i) || '',
+        charge: e.ch / 100,
+        sprinting: Math.hypot(e.vx, e.vy) > 340,
+        offline: e.on === 0
+      });
+    }
+
+    const bs = Math.hypot(state.b.vx, state.b.vy);
+    const ball = this.ballOutsideBodies(state, self);
+    this.ballView.draw(ctx, ball.x, ball.y, bs);
+    this.fx.draw(ctx);
+
+    ctx.restore();
+
+    // ---- screen-space overlays ----
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.fx.drawFlash(ctx, w, h);
+    this.drawBanner(ctx, w, h, state);
+  }
+
+  /**
+   * The ball we draw is ~120ms old while our own body is predicted to now, so
+   * the two can appear to overlap for a moment. The server will separate them
+   * on its next tick; nudge the drawn ball out so it looks right meanwhile.
+   */
+  ballOutsideBodies(state, self) {
+    let { x, y } = state.b;
+    const min = PLAYER.RADIUS + BALL.RADIUS;
+    const bodies = self ? [self, ...state.e.filter((e) => e.i !== this.selfId)] : state.e;
+    for (const b of bodies) {
+      const dx = x - b.x, dy = y - b.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 0 && d < min) {
+        x = b.x + (dx / d) * min;
+        y = b.y + (dy / d) * min;
+      }
+    }
+    return { x, y };
+  }
+
+  drawBanner(ctx, w, h, state) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    if (state.p === PHASE.COUNTDOWN) {
+      const n = Math.ceil(state.cd);
+      const frac = state.cd - Math.floor(state.cd);
+      const label = n <= 0 ? 'Kick off' : String(n);
+      const scale = 1 + (1 - frac) * 0.35;
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = Math.min(1, frac * 2.2);
+      ctx.fillStyle = '#fff';
+      ctx.font = `800 ${Math.round(Math.min(w, h) * 0.22)}px -apple-system, system-ui, sans-serif`;
+      ctx.shadowColor = 'rgba(0,0,0,.6)';
+      ctx.shadowBlur = 26;
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+      return;
+    }
+
+    if (!this.banner) return;
+    const left = this.banner.until - performance.now();
+    if (left <= 0) { this.banner = null; return; }
+
+    const age = 1 - Math.max(0, Math.min(1, left / 1400));
+    ctx.save();
+    ctx.translate(w / 2, h * 0.42);
+    ctx.scale(1 + age * 0.06, 1 + age * 0.06);
+    ctx.globalAlpha = Math.min(1, left / 320);
+    ctx.fillStyle = this.banner.color || '#fff';
+    ctx.font = `800 ${Math.round(Math.min(w, h) * 0.16)}px -apple-system, system-ui, sans-serif`;
+    ctx.shadowColor = 'rgba(0,0,0,.65)';
+    ctx.shadowBlur = 30;
+    ctx.fillText(this.banner.text, 0, 0);
+    if (this.banner.sub) {
+      ctx.font = `600 ${Math.round(Math.min(w, h) * 0.045)}px -apple-system, system-ui, sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.fillText(this.banner.sub, 0, Math.min(w, h) * 0.13);
+    }
+    ctx.restore();
+  }
+
+  celebrateGoal(team, ball) {
+    const col = TEAM_COLORS[team];
+    this.fx.goalBurst(ball?.x ?? FIELD.W / 2, ball?.y ?? FIELD.H / 2,
+      team === 'RED' ? '255,59,82' : '47,123,255');
+    this.camera.addShake(18);
+    this.showBanner('Goal', null, 2.4, col.main);
+  }
+}
+
+/* ---------------------------------------------- main */
+// Wires everything together: network -> state -> renderer, and input -> network.
+
+
+
+
+
+
+
+
+const net = new NetworkClient();
+const ui = new UI(sound);
+const touch = new TouchControls(document);
+const keys = new KeyboardControls();
+const game = new Game(document.getElementById('pitch'), sound);
+
+let room = null;
+let inMatch = false;
+let inputSeq = 0;
+
+// -------------------------------------------------------------- audio unlock
+// iOS will not make a sound until the user touches the page once.
+const unlock = () => { sound.unlock(); window.removeEventListener('touchend', unlock); };
+window.addEventListener('touchend', unlock, { once: true });
+window.addEventListener('mousedown', unlock, { once: true });
+window.addEventListener('keydown', unlock, { once: true });
+
+// ----------------------------------------------------------- pinch / scroll
+// Stop Safari turning a two-finger sprint into a page zoom.
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('touchmove', (e) => {
+  if (inMatch && e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+document.addEventListener('dblclick', (e) => e.preventDefault());
+
+// ------------------------------------------------------------- orientation
+function checkOrientation() {
+  const portrait = window.innerHeight > window.innerWidth && window.innerWidth < 820;
+  document.getElementById('rotate').classList.toggle('hidden', !portrait);
+}
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', () => setTimeout(checkOrientation, 200));
+checkOrientation();
+
+// ------------------------------------------------------------- current input
+function currentInput() {
+  const axis = touch.enabled && (touch.axis.x || touch.axis.y) ? touch.axis : keys.axis;
+  const btn = {
+    shoot:  touch.buttons.shoot  || keys.buttons.shoot,
+    pass:   touch.buttons.pass   || keys.buttons.pass,
+    sprint: touch.buttons.sprint || keys.buttons.sprint
+  };
+  return { ax: axis.x, ay: axis.y, ...btn };
+}
+// One input sample per server tick, always sent. Reconciliation depends on the
+// client and the server having stepped the same inputs the same number of
+// times, so skipping "unchanged" samples would break the replay. Thirty small
+// packets a second is nothing on any connection that can load the page.
+setInterval(() => {
+  if (!inMatch) return;
+  const sample = { ...currentInput(), seq: ++inputSeq };
+  game.stepPrediction(sample);
+  net.sendInput(sample);
+}, 1000 / NET.TICK_RATE);
+
+// ------------------------------------------------------------- UI handlers
+ui.on('setName', (name) => { net.setName(name); ui.setGreeting(name); });
+ui.on('createRoom', () => net.createRoom());
+ui.on('joinRoom', (code) => net.joinRoom(code));
+ui.on('quickMatch', () => net.quickMatch());
+ui.on('pickTeam', (team) => net.pickTeam(team));
+ui.on('startMatch', () => net.startMatch());
+ui.on('rematch', () => net.rematch());
+ui.on('leaveRoom', () => { net.leaveRoom(); leaveMatch(); });
+ui.on('retry', () => net.connect());
+ui.on('setCamera', (mode) => game.camera.setMode(mode));
+
+// ----------------------------------------------------------- network events
+net.on('status', (status) => {
+  if (status === 'open') ui.connection(null);
+  else if (status === 'connecting') ui.connection('Connecting');
+  else if (status === 'reconnecting') ui.connection('Reconnecting');
+  else if (status === 'closed' && inMatch) ui.connection('Reconnecting');
+});
+
+net.on('welcome', (msg) => {
+  game.setSelf(msg.id);
+  if (msg.name) ui.setGreeting(msg.name);
+  // Deep link: /?room=A7K92 drops you straight into a friend's room.
+  const wanted = new URLSearchParams(location.search).get('room');
+  if (wanted && net.name) {
+    history.replaceState({}, '', location.pathname);
+    net.joinRoom(wanted.toUpperCase());
+  }
+});
+
+net.on('err', (msg) => {
+  ui.toast(msg.msg || 'Something went wrong.');
+  if (msg.code === 'ROOM_NOT_FOUND' || msg.code === 'ROOM_FULL' || msg.code === 'IN_PROGRESS') {
+    if (ui.current !== 'menu') ui.show(ui.current === 'join' ? 'join' : 'menu');
+  }
+});
+
+net.on('room', (msg) => {
+  room = msg;
+  const names = new Map(msg.players.map((p) => [p.id, p.name]));
+  game.setNames(names);
+
+  const red = msg.players.find((p) => p.team === TEAM.RED);
+  const blue = msg.players.find((p) => p.team === TEAM.BLUE);
+  ui.setMatchNames(red?.name, blue?.name);
+
+  if (msg.phase === PHASE.LOBBY) {
+    if (inMatch) leaveMatch();
+    ui.renderRoom(msg, net.sessionId);
+    if (ui.current !== 'room') ui.show('room');
+  } else if (msg.phase === PHASE.ENDED) {
+    // handled by the 'end' event, but keep rematch state fresh
+    ui.renderRoom(msg, net.sessionId);
+  } else if (!inMatch) {
+    enterMatch();
+  }
+});
+
+net.on('matchStart', () => {
+  enterMatch();
+  sound.matchStart();
+});
+
+net.on('state', (msg) => {
+  game.pushSnapshot(msg);
+  if (!inMatch && msg.p !== PHASE.LOBBY && msg.p !== PHASE.ENDED) enterMatch();
+  ui.setScore(msg.s.R, msg.s.B);
+  ui.setClock(msg.c);
+
+  const mine = msg.e.find((e) => e.i === net.sessionId);
+  if (mine) touch.render(mine.ch / 100, mine.st);
+
+  if (localStorage.getItem('sl.debug') === 'on') {
+    document.getElementById('dbg-fps').textContent = `fps ${game.fps}`;
+    document.getElementById('dbg-ping').textContent = `ping ${net.ping}ms`;
+    document.getElementById('dbg-tick').textContent = `tick ${msg.k}`;
+    document.getElementById('dbg-players').textContent = `players ${msg.e.length}`;
+  }
+});
+
+net.on('goal', (msg) => {
+  sound.goal();
+  game.celebrateGoal(msg.team, game.state?.b);
+  ui.setScore(msg.score.RED, msg.score.BLUE);
+});
+
+net.on('kick', (msg) => sound.kick(Math.min(1, msg.power / 900)));
+net.on('pass', () => sound.pass());
+net.on('post', () => { sound.post(); game.camera.addShake(6); });
+
+net.on('end', (msg) => {
+  sound.fullTime();
+  const names = {
+    RED:  room?.players.find((p) => p.team === TEAM.RED)?.name,
+    BLUE: room?.players.find((p) => p.team === TEAM.BLUE)?.name
+  };
+  if (msg.reason === 'opponent_left') ui.toast('Your opponent left the match.');
+  setTimeout(() => {
+    leaveMatch();
+    ui.showEnd(msg.score, msg.winner, names);
+  }, 900);
+});
+
+net.on('peer', (msg) => {
+  if (msg.event === 'disconnected') ui.connection('Opponent reconnecting');
+  if (msg.event === 'reconnected') ui.connection(null);
+});
+
+net.on('kicked', () => leaveMatch());
+
+// ------------------------------------------------------------ match toggles
+function enterMatch() {
+  inMatch = true;
+  document.getElementById('pitch').classList.remove('hidden');
+  ui.show('match');
+  touch.setEnabled(isTouchDevice());
+  keys.setEnabled(true);
+  game.start();
+}
+
+function leaveMatch() {
+  inMatch = false;
+  document.getElementById('pitch').classList.add('hidden');
+  touch.setEnabled(false);
+  keys.setEnabled(false);
+  game.stop();
+}
+
+function isTouchDevice() {
+  return matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+}
+
+// ---------------------------------------------------------------- start up
+document.getElementById('pitch').classList.add('hidden');
+ui.show(net.name ? 'menu' : 'name');
+if (net.name) ui.setGreeting(net.name);
+net.connect();
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>

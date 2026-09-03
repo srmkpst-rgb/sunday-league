@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: sunday-league
+    runtime: node
+    plan: free
+    region: frankfurt        # closest to Turkey; Oregon adds ~150ms of lag
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
